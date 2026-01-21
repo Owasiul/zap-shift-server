@@ -38,6 +38,23 @@ client
         res.status(500).send({ error: "Failed to fetch parcels" });
       }
     });
+    // set the sender email
+    app.get("/parcels", async (req, res) => {
+      try {
+        const query = {}
+        const {email} = req.query
+        if(email){
+          query.sender-email === email
+        }
+        const parcels = await parcelCollections.find(query).toArray();
+        res.send(parcels);
+      } catch (error) {
+        console.log(error);
+        res.status(500).send({ error: "Failed to fetch parcels" });
+      }
+    });
+
+
 
     app.post("/parcels", async (req, res) => {
       try {
