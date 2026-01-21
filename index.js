@@ -29,9 +29,10 @@ client
     const parcelCollections = zapShiftDB.collection("parcels");
 
     // parcels api
-    app.get("/parcels", async (req, res) => {
+    app.get("/parcel", async (req, res) => {
       try {
         const parcels = await parcelCollections.find().toArray();
+        parcels.createdAt = new Date();
         res.send(parcels);
       } catch (error) {
         console.log(error);
@@ -39,22 +40,22 @@ client
       }
     });
     // set the sender email
-    app.get("/parcels", async (req, res) => {
+    app.get(`/parcels`, async (req, res) => {
       try {
-        const query = {}
-        const {email} = req.query
-        if(email){
-          query.sender-email === email
+        const query = {};
+        const { email } = req.query;
+        if (email) {
+          query["sender-email"] = email;
         }
-        const parcels = await parcelCollections.find(query).toArray();
+        const options = { sort: { createdAt: -1 } };
+        const parcels = await parcelCollections.find(query, options).toArray();
+        parcels.createdAt = new Date();
         res.send(parcels);
       } catch (error) {
         console.log(error);
         res.status(500).send({ error: "Failed to fetch parcels" });
       }
     });
-
-
 
     app.post("/parcels", async (req, res) => {
       try {
