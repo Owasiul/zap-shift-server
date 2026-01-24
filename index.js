@@ -192,6 +192,22 @@ client
       }
     });
 
+    // payment related api
+    app.get("/payment-history", async (req, res) => {
+      try {
+        const email = req.query.email;
+        const query = {};
+        if (email) {
+          query.email = email;
+        }
+        const cursor = await paymentColllection.find(query).toArray();
+        res.send(cursor);
+      } catch (error) {
+        res.status(500).send("couldn't get the payments");
+        console.error(error.message);
+      }
+    });
+
     // Send a ping to confirm a successful connection
     client.db("admin").command({ ping: 1 });
 
