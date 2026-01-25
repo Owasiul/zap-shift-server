@@ -9,6 +9,32 @@ const stripe = require("stripe")(process.env.Stripe_key);
 // middleware
 app.use(express.json());
 app.use(cors());
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./zap-shift-edde7-firebase-adminsdk-fbsvc-d4ad9a440f.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+const verifyFirebaseToken = async (req, res, next) => {
+  const authorization = req.headers.authorization;
+  if (!authorization) {
+    return res.status(401).send({ message: "Unauthorized Access" });
+  }
+  try {
+    const tokenId = authorization.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(tokenId);
+    req.decoded_email = decoded.email;
+    console.log(decoded);
+    next();
+  } catch (error) {
+    res.status(401).send({ message: "Unauthorized Access" });
+    console.log(error);
+  }
+
+  // console.log(authorization);
+};
 
 const uri = `mongodb+srv://${process.env.DB_User}:${process.env.DB_Pass}@cluster0.ldvla9s.mongodb.net/?appName=Cluster0`;
 
@@ -193,12 +219,18 @@ client
     });
 
     // payment related api
-    app.get("/payment-history", async (req, res) => {
+    app.get("/payment-history", verifyFirebaseToken, async (req, res) => {
       try {
         const email = req.query.email;
+
+        // console.log("headers", req.headers);
+
         const query = {};
         if (email) {
           query.email = email;
+          if (email !== decoded_email) {
+            res.status(403).send({ message: "Forbiden Access" });
+          }
         }
         const cursor = await paymentColllection.find(query).toArray();
         res.send(cursor);
