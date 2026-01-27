@@ -39,6 +39,7 @@ const verifyFirebaseToken = async (req, res, next) => {
 const uri = `mongodb+srv://${process.env.DB_User}:${process.env.DB_Pass}@cluster0.ldvla9s.mongodb.net/?appName=Cluster0`;
 
 const { customAlphabet } = require("nanoid");
+const { error } = require("node:console");
 const nanoid = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", 8);
 
 function generateTrackingId() {
@@ -68,7 +69,60 @@ client
     const zapShiftDB = client.db("zapShiftDB");
     const parcelCollections = zapShiftDB.collection("parcels");
     const paymentColllection = zapShiftDB.collection("payments");
+    const usersColllection = zapShiftDB.collection("users");
+    const ridersColllection = zapShiftDB.collection("riders");
 
+    // users api
+    app.post("/users", async (req, res) => {
+      try {
+        const user = req.body;
+        user.role = "user";
+        user.createdAt = new Date();
+
+        const email = user.email;
+        const emailExits = await usersColllection.findOne({ email });
+        if (emailExits) {
+          return res.send({ message: "User is already exists" });
+        }
+
+        const result = await usersColllection.insertOne(user);
+        res.send(result);
+      } catch (error) {
+        console.log({ error, message: "faild to create user" });
+      }
+    });
+    // riders api
+
+    app.get("/riders", async (req, res) => {
+      const query = {};
+      if (req.status.query) {
+        query.status = req.query.status;
+      }
+      const result = await ridersColllection
+        .find(query)
+        .sort({ createdAt: 1 })
+        .toArray();
+      res.send(result);
+    });
+
+    app.post("/riders", async (req, res) => {
+      try {
+        const rider = req.body;
+        rider.status = "pending";
+        rider.createdAt = new Date();
+
+        const email = rider.email;
+        const emailExits = await ridersColllection.findOne({ email });
+        if (emailExits) {
+          return res.send({ message: "User is already exists" });
+        }
+
+        const result = await ridersColllection.insertOne(rider);
+        res.send(result);
+      } catch (error) {
+        console.log({ error, message: "faild to create Rider" });
+      }
+    });
     // parcels api
     app.get("/all-parcel", async (req, res) => {
       try {
@@ -227,13 +281,11 @@ client
         }
       } catch (error) {
         console.error("Payment verification error:", error);
-        res
-          .status(500)
-          .send({
-            success: false,
-            message: "Payment verification failed",
-            error: error.message,
-          });
+        res.status(500).send({
+          success: false,
+          message: "Payment verification failed",
+          error: error.message,
+        });
       }
     });
     // payment related api
