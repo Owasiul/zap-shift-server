@@ -26,7 +26,7 @@ const verifyFirebaseToken = async (req, res, next) => {
     const tokenId = authorization.split(" ")[1];
     const decoded = await admin.auth().verifyIdToken(tokenId);
     req.decoded_email = decoded.email;
-    console.log(decoded);
+    // console.log(decoded);
     next();
   } catch (error) {
     res.status(401).send({ message: "Unauthorized Access" });
@@ -171,40 +171,50 @@ client
     });
 
     app.patch("/verify-payment-success", async (req, res) => {
-      const sessionId = req.query.session_id;
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
-      const TrackingId = generateTrackingId();
-      // console.log("seession retrive", session);
-      if (session.payment_status === "paid") {
-        const id = session.metadata.parcelId;
-        const query = { _id: new ObjectId(id) };
-        const update = {
-          $set: {
-            payment_status: "paid",
-            trackingId: TrackingId,
-          },
-        };
-        const result = await parcelCollections.updateOne(query, update);
+      try {
+        const sessionId = req.query.session_id;
 
-        const paymentHistory = {
-          amount: session.amount_total / 100,
-          currency: session.currency,
-          email: session.customer_details.email,
-          parcelId: session.metadata.parcelId,
-          parcelName: session.metadata.parcelName,
-          transactionId: session.payment_intent,
-          PaymentStatus: session.payment_status,
-          paidAt: new Date(),
-        };
+        if (!sessionId) {
+          return res
+            .status(400)
+            .send({ success: false, message: "Session ID is required" });
+        }
 
-        // console.log(paymentHistory);
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        const TrackingId = generateTrackingId();
+
         if (session.payment_status === "paid") {
+          const id = session.metadata.parcelId;
+          const query = { _id: new ObjectId(id) };
+          const update = {
+            $set: {
+              payment_status: "paid",
+              trackingId: TrackingId,
+            },
+          };
+          const result = await parcelCollections.updateOne(query, update);
+
+          const paymentHistory = {
+            amount: session.amount_total / 100,
+            currency: session.currency,
+            email: session.customer_details.email,
+            parcelId: session.metadata.parcelId,
+            parcelName: session.metadata.parcelName,
+            transactionId: session.payment_intent,
+            PaymentStatus: session.payment_status,
+            trackingId: TrackingId,
+            paidAt: new Date(),
+          };
+
+          // ✅ Fixed: Use upsert to insert if doesn't exist
           const resultPayment = await paymentColllection.updateOne(
             { transactionId: session.payment_intent },
             { $set: paymentHistory },
-            { trackingId: TrackingId },
+            { upsert: true },
           );
+
           console.log(resultPayment);
+
           res.send({
             success: true,
             transactionId: session.payment_intent,
@@ -213,11 +223,19 @@ client
             paymentInfo: resultPayment,
           });
         } else {
-          res.send({ success: false, message: "Payment Failed" });
+          res.send({ success: false, message: "Payment not completed" });
         }
+      } catch (error) {
+        console.error("Payment verification error:", error);
+        res
+          .status(500)
+          .send({
+            success: false,
+            message: "Payment verification failed",
+            error: error.message,
+          });
       }
     });
-
     // payment related api
     app.get("/payment-history", verifyFirebaseToken, async (req, res) => {
       try {
@@ -227,12 +245,16 @@ client
 
         const query = {};
         if (email) {
+          const decoded_email = req.decoded_email;
           query.email = email;
           if (email !== decoded_email) {
             res.status(403).send({ message: "Forbiden Access" });
           }
         }
-        const cursor = await paymentColllection.find(query).toArray();
+        const cursor = await paymentColllection
+          .find(query)
+          .sort({ paidAt: -1 })
+          .toArray();
         res.send(cursor);
       } catch (error) {
         res.status(500).send("couldn't get the payments");
