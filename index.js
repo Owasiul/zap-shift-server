@@ -73,6 +73,34 @@ client
     const ridersColllection = zapShiftDB.collection("riders");
 
     // users api
+    app.get("/users", verifyFirebaseToken, async (req, res) => {
+      try {
+        const user = await usersColllection.find().toArray();
+        res.send(user);
+      } catch (error) {
+        console.log({ error, message: "Can't get the data of users" });
+      }
+    });
+
+    app.patch("/users/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const roleInfo = req.body.role;
+        console.log(roleInfo);
+        const query = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            role: roleInfo,
+          },
+        };
+        const result = await usersColllection.updateOne(query, updateDoc);
+        console.log(result);
+        res.send(result);
+      } catch (error) {
+        console.log({ error, message: "couldn't patch" });
+      }
+    });
+
     app.post("/users", async (req, res) => {
       try {
         const user = req.body;
@@ -92,15 +120,14 @@ client
       }
     });
     // riders api
-
     app.get("/riders", async (req, res) => {
       const query = {};
-      if (req.status.query) {
+      if (req.query.status) {
         query.status = req.query.status;
       }
       const result = await ridersColllection
         .find(query)
-        .sort({ createdAt: 1 })
+        // .sort({ createdAt: 1 })
         .toArray();
       res.send(result);
     });
@@ -123,6 +150,35 @@ client
         console.log({ error, message: "faild to create Rider" });
       }
     });
+
+    app.patch("/riders/:id", verifyFirebaseToken, async (req, res) => {
+      const status = req.body.status;
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: {
+          status: status,
+        },
+      };
+      const result = await ridersColllection.updateOne(query, updateDoc);
+
+      if (status === "approved") {
+        const email = req.body.email;
+        const userQuery = { email };
+        const updateUser = {
+          $set: {
+            role: "rider",
+          },
+        };
+        const userResult = await usersColllection.updateOne(
+          userQuery,
+          updateUser,
+        );
+      }
+
+      res.send(result);
+    });
+
     // parcels api
     app.get("/all-parcel", async (req, res) => {
       try {
