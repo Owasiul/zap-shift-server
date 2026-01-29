@@ -39,7 +39,6 @@ const verifyFirebaseToken = async (req, res, next) => {
 const uri = `mongodb+srv://${process.env.DB_User}:${process.env.DB_Pass}@cluster0.ldvla9s.mongodb.net/?appName=Cluster0`;
 
 const { customAlphabet } = require("nanoid");
-const { error } = require("node:console");
 const nanoid = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", 8);
 
 function generateTrackingId() {
@@ -72,34 +71,79 @@ client
     const usersColllection = zapShiftDB.collection("users");
     const ridersColllection = zapShiftDB.collection("riders");
 
+    // middle wire with database access
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await usersColllection.findOne(query);
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
+
     // users api
     app.get("/users", verifyFirebaseToken, async (req, res) => {
       try {
-        const user = await usersColllection.find().toArray();
+        const searchText = req.query.searchText;
+        const query = {};
+        if (searchText) {
+          // query.displayName = { $regex: searchText, $options: "i" };
+          query.$or = [
+            { displayName: { $regex: searchText, $options: "i" } },
+            { email: { $regex: searchText, $options: "i" } },
+          ];
+        }
+        const user = await usersColllection
+          .find(query)
+          .sort({ createdAt: -1 })
+          .limit(15)
+          .toArray();
         res.send(user);
       } catch (error) {
         console.log({ error, message: "Can't get the data of users" });
       }
     });
 
-    app.patch("/users/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const roleInfo = req.body.role;
-        console.log(roleInfo);
-        const query = { _id: new ObjectId(id) };
-        const updateDoc = {
-          $set: {
-            role: roleInfo,
-          },
-        };
-        const result = await usersColllection.updateOne(query, updateDoc);
-        console.log(result);
-        res.send(result);
-      } catch (error) {
-        console.log({ error, message: "couldn't patch" });
-      }
-    });
+    app.get(
+      "/users/:email/roles",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const email = req.params.email;
+          const query = { email };
+          const user = await usersColllection.findOne(query);
+          res.send({ role: user?.role || "user" });
+        } catch (error) {
+          console.error("Error fetching user role:", error);
+          res.status(500).send({ role: "user", error: "Failed to fetch role" });
+        }
+      },
+    );
+    app.patch(
+      "/users/:id/role",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const id = req.params.id;
+          const roleInfo = req.body.role;
+          console.log(roleInfo);
+          const query = { _id: new ObjectId(id) };
+          const updateDoc = {
+            $set: {
+              role: roleInfo,
+            },
+          };
+          const result = await usersColllection.updateOne(query, updateDoc);
+          console.log(result);
+          res.send(result);
+        } catch (error) {
+          console.log({ error, message: "couldn't patch" });
+        }
+      },
+    );
 
     app.post("/users", async (req, res) => {
       try {
@@ -151,33 +195,38 @@ client
       }
     });
 
-    app.patch("/riders/:id", verifyFirebaseToken, async (req, res) => {
-      const status = req.body.status;
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: {
-          status: status,
-        },
-      };
-      const result = await ridersColllection.updateOne(query, updateDoc);
-
-      if (status === "approved") {
-        const email = req.body.email;
-        const userQuery = { email };
-        const updateUser = {
+    app.patch(
+      "/riders/:id",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        const status = req.body.status;
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const updateDoc = {
           $set: {
-            role: "rider",
+            status: status,
           },
         };
-        const userResult = await usersColllection.updateOne(
-          userQuery,
-          updateUser,
-        );
-      }
+        const result = await ridersColllection.updateOne(query, updateDoc);
 
-      res.send(result);
-    });
+        if (status === "approved") {
+          const email = req.body.email;
+          const userQuery = { email };
+          const updateUser = {
+            $set: {
+              role: "rider",
+            },
+          };
+          const userResult = await usersColllection.updateOne(
+            userQuery,
+            updateUser,
+          );
+        }
+
+        res.send(result);
+      },
+    );
 
     // parcels api
     app.get("/all-parcel", async (req, res) => {
