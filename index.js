@@ -105,22 +105,17 @@ client
       }
     });
 
-    app.get(
-      "/users/:email/roles",
-      verifyFirebaseToken,
-      verifyAdmin,
-      async (req, res) => {
-        try {
-          const email = req.params.email;
-          const query = { email };
-          const user = await usersColllection.findOne(query);
-          res.send({ role: user?.role || "user" });
-        } catch (error) {
-          console.error("Error fetching user role:", error);
-          res.status(500).send({ role: "user", error: "Failed to fetch role" });
-        }
-      },
-    );
+    app.get("/users/:email/roles", verifyFirebaseToken, async (req, res) => {
+      try {
+        const email = req.params.email;
+        const query = { email };
+        const user = await usersColllection.findOne(query);
+        res.send({ role: user?.role || "user" });
+      } catch (error) {
+        console.error("Error fetching user role:", error);
+        res.status(500).send({ role: "user", error: "Failed to fetch role" });
+      }
+    });
     app.patch(
       "/users/:id/role",
       verifyFirebaseToken,
@@ -165,15 +160,24 @@ client
     });
     // riders api
     app.get("/riders", async (req, res) => {
-      const query = {};
-      if (req.query.status) {
-        query.status = req.query.status;
+      try {
+        const query = {};
+        const { status, district, workingStatus } = req.query;
+        if (status) {
+          query.status = status;
+        }
+        if (district) {
+          query.riderDistrict = district;
+        }
+        if (workingStatus) {
+          query.workingStatus = workingStatus;
+        }
+        console.log(query);
+        const result = await ridersColllection.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        console.log({ error, message: "a error has been hapened" });
       }
-      const result = await ridersColllection
-        .find(query)
-        // .sort({ createdAt: 1 })
-        .toArray();
-      res.send(result);
     });
 
     app.post("/riders", async (req, res) => {
@@ -201,11 +205,13 @@ client
       verifyAdmin,
       async (req, res) => {
         const status = req.body.status;
+        // console.log(status);
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
         const updateDoc = {
           $set: {
             status: status,
+            workingStatus: "available",
           },
         };
         const result = await ridersColllection.updateOne(query, updateDoc);
@@ -243,13 +249,16 @@ client
     app.get(`/parcels`, async (req, res) => {
       try {
         const query = {};
-        const { email } = req.query;
+        const { email, delivery_status } = req.query;
         if (email) {
           query["sender-email"] = email;
         }
+        if (delivery_status) {
+          query.delivery_status = delivery_status;
+        }
+        // console.log(query);
         const options = { sort: { createdAt: -1 } };
         const parcels = await parcelCollections.find(query, options).toArray();
-        parcels.createdAt = new Date();
         res.send(parcels);
       } catch (error) {
         console.log(error);
@@ -271,12 +280,42 @@ client
     app.post("/parcels", async (req, res) => {
       try {
         const parcel = req.body;
+        parcel.createdAt = new Date();
         const result = await parcelCollections.insertOne(parcel);
         res.send(result);
       } catch (error) {
         console.log(error);
         res.status(500).send({ error: "Failed to create parcel" });
       }
+    });
+
+    app.patch("/parcels/:id", async (req, res) => {
+      const { riderID, riderName, riderEmail } = req.body;
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: {
+          delivery_status: "rider-assigned",
+          riderID,
+          riderName,
+          riderEmail,
+        },
+      };
+      const result = await parcelCollections.updateOne(query, updateDoc);
+
+      // update rider
+      const riderQuery = { _id: new ObjectId(riderID) };
+      const riderUpdatedDoc = {
+        $set: {
+          workingStatus: "in_delivery",
+        },
+      };
+      const riderResult = await ridersColllection.updateOne(
+        riderQuery,
+        riderUpdatedDoc,
+      );
+
+      res.send(riderResult);
     });
 
     app.delete("/parcels/:id", async (req, res) => {
@@ -297,8 +336,7 @@ client
       try {
         const paymentInfo = req.body;
         const amount = Math.round(paymentInfo.cost) * 100;
-        // console.log({amount});
-
+        console.log(paymentInfo);
         const session = await stripe.checkout.sessions.create({
           line_items: [
             {
@@ -316,6 +354,7 @@ client
           metadata: {
             parcelId: paymentInfo.parcelId,
             parcelName: paymentInfo["parcel-name"],
+            userEmail: paymentInfo.email,
           },
           success_url: `${YOUR_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${YOUR_DOMAIN}/dashboard/payment-cancelled`,
@@ -348,6 +387,7 @@ client
           const update = {
             $set: {
               payment_status: "paid",
+              delivery_status: "pending-pickup",
               trackingId: TrackingId,
             },
           };
@@ -356,7 +396,7 @@ client
           const paymentHistory = {
             amount: session.amount_total / 100,
             currency: session.currency,
-            email: session.customer_details.email,
+            email: session.metadata.userEmail,
             parcelId: session.metadata.parcelId,
             parcelName: session.metadata.parcelName,
             transactionId: session.payment_intent,
@@ -397,17 +437,19 @@ client
     app.get("/payment-history", verifyFirebaseToken, async (req, res) => {
       try {
         const email = req.query.email;
+        const decoded_email = req.decoded_email;
 
         // console.log("headers", req.headers);
 
         const query = {};
         if (email) {
-          const decoded_email = req.decoded_email;
-          query.email = email;
+          query.email = { $regex: email, $options: "i" };
+
           if (email !== decoded_email) {
             res.status(403).send({ message: "Forbiden Access" });
           }
         }
+        // console.log(query);
         const cursor = await paymentColllection
           .find(query)
           .sort({ paidAt: -1 })
