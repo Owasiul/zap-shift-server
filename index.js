@@ -39,6 +39,7 @@ const verifyFirebaseToken = async (req, res, next) => {
 const uri = `mongodb+srv://${process.env.DB_User}:${process.env.DB_Pass}@cluster0.ldvla9s.mongodb.net/?appName=Cluster0`;
 
 const { customAlphabet } = require("nanoid");
+const { error } = require("node:console");
 const nanoid = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", 8);
 
 function generateTrackingId() {
@@ -107,10 +108,13 @@ client
 
     app.get("/users/:email/roles", verifyFirebaseToken, async (req, res) => {
       try {
-        const email = req.params.email;
+        const email = req.decoded_email;
+        console.log(req.decoded_email);
+        console.log(email);
         const query = { email };
         const user = await usersColllection.findOne(query);
-        res.send({ role: user?.role || "user" });
+        console.log(user);
+        res.send({ role: user?.role });
       } catch (error) {
         console.error("Error fetching user role:", error);
         res.status(500).send({ role: "user", error: "Failed to fetch role" });
@@ -186,7 +190,7 @@ client
         rider.status = "pending";
         rider.createdAt = new Date();
 
-        const email = rider.email;
+        const email = { $regex: new RegExp(`^${rider.email}$`, "i") };
         const emailExits = await ridersColllection.findOne({ email });
         if (emailExits) {
           return res.send({ message: "User is already exists" });
@@ -208,6 +212,12 @@ client
         // console.log(status);
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
+        const rider = await ridersColllection.findOne(query);
+
+        if (!rider) {
+          return res.status(404).send({ message: "Rider not found" });
+        }
+
         const updateDoc = {
           $set: {
             status: status,
@@ -217,7 +227,7 @@ client
         const result = await ridersColllection.updateOne(query, updateDoc);
 
         if (status === "approved") {
-          const email = req.body.email;
+          const email = { $regex: new RegExp(`^${rider.email}$`, "i") };
           const userQuery = { email };
           const updateUser = {
             $set: {
@@ -265,10 +275,35 @@ client
         res.status(500).send({ error: "Failed to fetch parcels" });
       }
     });
+
+    app.get("/parcels/rider", async (req, res) => {
+      try {
+        const { email, deliveryStatus } = req.query;
+        const query = {};
+        if (email) {
+          query.riderEmail = { $regex: new RegExp(`^${email}$`, "i") };
+        }
+        if (deliveryStatus) {
+          query.delivery_status = { $in: ["rider-assigned", "rider-ariving"] };
+        }
+        console.log(query);
+        const result = await parcelCollections.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error, message: "can't fetch data of riders" });
+      }
+    });
+
     // get via id
     app.get("/parcels/:id", async (req, res) => {
       try {
         const id = req.params.id;
+        console.log(id);
+        if (!id || !ObjectId.isValid(id)) {
+          return res.status(400).send({
+            error: "Invalid ID format. Must be a 24 character hex string.",
+          });
+        }
         const query = { _id: new ObjectId(id) };
         const result = await parcelCollections.findOne(query);
         res.send(result);
@@ -289,6 +324,7 @@ client
       }
     });
 
+    // TODO: update the path name like /parcles/:id/assign
     app.patch("/parcels/:id", async (req, res) => {
       const { riderID, riderName, riderEmail } = req.body;
       const id = req.params.id;
@@ -316,6 +352,22 @@ client
       );
 
       res.send(riderResult);
+    });
+
+    app.patch("/parcels/:id/status", async (req, res) => {
+      try {
+        const { deliveryStatus } = req.body;
+        const query = { _id: new ObjectId(req.params.id) };
+        const updateDoc = {
+          $set: {
+            delivery_status: deliveryStatus,
+          },
+        };
+        const result = await parcelCollections.updateOne(query, updateDoc);
+        res.send(result);
+      } catch (eror) {
+        console.log({ error, message: "can't fetch data" });
+      }
     });
 
     app.delete("/parcels/:id", async (req, res) => {
